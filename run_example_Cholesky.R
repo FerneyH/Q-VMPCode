@@ -14,7 +14,6 @@ xbar1 <- mean(x1)
 ## F_hat_normal(mu, sigma2): the free energy of eq. (7),
 ##   \hat F(mu,sigma2) = (n+1)/2 (mu^2+sigma2) - n*xbar*mu - (1/2) log(sigma2) - 1/2
 ## Optimized over (mu, log(sigma2)) for stability
-## optim()'s finite-difference gradient is poorly conditioned across scales
 F_hat_normal <- function(par) {
   mu         <- par[1]
   log_sigma2 <- par[2]
@@ -54,18 +53,27 @@ cat(sprintf("Q-VMP wall-clock time\n", t_qvmp_normal["elapsed"]))
 cat(sprintf("Stan/MCMC wall-clock time\n", t_mcmc_normal["elapsed"]))
 cat(sprintf("Speed-up (MCMC / Q-VMP)\n", t_mcmc_normal["elapsed"] / t_qvmp_normal["elapsed"]))
 
-pdf("fig_normal.pdf", width = 6, height = 5)
-hist(mu_samples_normal, breaks = 40, probability = TRUE, main = "", xlab = expression(theta))
+#pdf("fig_normal.pdf", width = 6, height = 5)
+tiff("fig_normal.tiff", width = 6, height = 5, units = "in", res = 600, compression = "lzw")
+col_qvmp    <- "#222222"
+col_mcmc_bg <- "#F2F2F2"
+col_mcmc_fg <- "#888888"
+
+hist(mu_samples_normal, breaks = 40, probability = TRUE, main = "", 
+     xlab = expression(theta), col = col_mcmc_bg, border = col_mcmc_fg)
+
 curve(dnorm(x, mean = mu_opt_normal, sd = sqrt(sigma2_opt_normal)),
-      col = "red", lwd = 2, add = TRUE)
-legend("topright", legend = c("Q-VMP", "MCMC"), col = c("red", "black"),
-       lwd = 2, bty = "n", cex = 0.8)
+      col = col_qvmp, lty = 1, lwd = 2.5, add = TRUE)
+
+legend("topright", legend = c("Q-VMP", "MCMC"), col = c(col_qvmp, col_mcmc_fg),
+       lty = c(1, NA), lwd = c(2.5, NA), pch = c(NA, 15), bty = "n", cex = 0.8)
+
 dev.off()
 
-saveRDS(list(mu_opt = mu_opt_normal, sigma2_opt = sigma2_opt_normal,
-             mean_mcmc = mean_mcmc_normal, sd_mcmc = sd_mcmc_normal,
-             t_qvmp = t_qvmp_normal, t_mcmc = t_mcmc_normal),
-        "sim_normal_results.rds")
+# saveRDS(list(mu_opt = mu_opt_normal, sigma2_opt = sigma2_opt_normal,
+#              mean_mcmc = mean_mcmc_normal, sd_mcmc = sd_mcmc_normal,
+#              t_qvmp = t_qvmp_normal, t_mcmc = t_mcmc_normal),
+#         "sim_normal_results.rds")
 
 ## ============================================================
 ## Example 2: Normal likelihood, beta prior and variational
@@ -137,11 +145,16 @@ cat(sprintf("Q-VMP wall-clock time\n", t_qvmp_beta["elapsed"]))
 cat(sprintf("Stan/MCMC wall-clock time\n", t_mcmc_beta["elapsed"]))
 cat(sprintf("Speed-up (MCMC / Q-VMP)\n", t_mcmc_beta["elapsed"] / t_qvmp_beta["elapsed"]))
 
-pdf("fig_beta.pdf", width = 6, height = 5)
-hist(mu_samples_beta, breaks = 40, probability = TRUE, main = "", xlab = expression(theta))
-curve(dbeta(x, alpha_opt, beta_opt), col = "red", lwd = 2, add = TRUE)
-legend("topright", legend = c("Q-VMP", "MCMC"), col = c("red", "black"),
-       lwd = 2, bty = "n", cex = 0.8)
+#pdf("fig_beta.pdf", width = 6, height = 5)
+tiff("fig_beta.tiff", width = 9, height = 6, units = "in", res = 600, compression = "lzw")
+hist(mu_samples_beta, breaks = 40, probability = TRUE, main = "", 
+     xlab = expression(theta), col = col_mcmc_bg, border = col_mcmc_fg)
+
+curve(dbeta(x, alpha_opt, beta_opt), col = col_qvmp, lty = 1, lwd = 2.5, add = TRUE)
+
+legend("topright", legend = c("Q-VMP", "MCMC"), col = c(col_qvmp, col_mcmc_fg),
+       lty = c(1, NA), lwd = c(2.5, NA), pch = c(NA, 15), bty = "n", cex = 0.8)
+
 dev.off()
 
 saveRDS(list(alpha_opt = alpha_opt, beta_opt = beta_opt,
@@ -179,11 +192,11 @@ F_hat <- function(par) {
   }
   diag(L) <- exp(diag(L))
   Sigma        <- L %*% t(L)                        # Sigma
-  logdet_Sigma <- 2 * sum(log(diag(L)))              # log|Sigma|
+  logdet_Sigma <- 2 * sum(log(diag(L)))             # log|Sigma|
 
-  z_mu <- as.vector(X %*% mu)                        # x_i' mu
-  s2   <- rowSums((X %*% Sigma) * X)                 # x_i' Sigma x_i
-  p_mu <- sigmoid(z_mu)                               # p_i = sigmoid(x_i' mu)
+  z_mu <- as.vector(X %*% mu)                       # x_i' mu
+  s2   <- rowSums((X %*% Sigma) * X)                # x_i' Sigma x_i
+  p_mu <- sigmoid(z_mu)                             # p_i = sigmoid(x_i' mu)
 
   # Example 3 free energy, additive constants in (mu,Sigma) dropped, term by term:
   trace_term  <- 0.5 * sum(Sigma0_inv * Sigma)                       #  (1/2) tr(Sigma0^{-1} Sigma)
@@ -239,8 +252,7 @@ saveRDS(list(summary_tab = summary_tab, t_qvmp = t_qvmp),
 ## (Student-t) field; the range phi is held FIXED at phi_true.
 ## Direct quasi-Newton minimization of the free
 ## energy F(mu, Sigma, a, b) of eq. (Fjoint) over the Cholesky
-## factor of Sigma. Same data-generating process
-## and model as the BLR primary fit.
+## factor of Sigma. 
 ## ============================================================
 set.seed(2)
 
@@ -274,13 +286,11 @@ eta <- as.vector(Xb %*% beta_true) + u_true
 y   <- rbinom(n, m, sigmoid(eta))
 X   <- cbind(Xb, diag(n)); d <- p_beta + n; ui <- (p_beta + 1):d
 
-## beta gets a flat (improper) prior -- no precision block to build for it.
 
-## phi is FIXED at phi_true (not estimated); R(phi) and its inverse are constants.
+## phi is FIXED at phi_true (not estimated), R(phi) and its inverse are constants.
 Rpi_c     <- solve(R_true)
 logdetR_c <- as.numeric(determinant(R_true, logarithm = TRUE)$modulus)
 
-## parameter layout: par = (mu[1:d], Lvec[1:d(d+1)/2], log_a, log_b)
 nL <- d * (d + 1) / 2
 
 build_L <- function(Lvec) {

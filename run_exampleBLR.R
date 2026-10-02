@@ -3,9 +3,7 @@ options(mc.cores = 2)
 
 ## ============================================================
 ## Example 3: Logistic regression, multivariate normal prior
-## and variational family, fit via the BLR natural-gradient
-## update derived in blr_derivations.tex (Example 3: Logistic
-## Regression, eqs. 3-lambda and 3-mu). Compared against Stan
+## and variational family. Compared against Stan
 ## NUTS (MCMC reference) and Stan ADVI (meanfield VI baseline).
 ## ============================================================
 set.seed(123)
@@ -20,7 +18,7 @@ y <- rbinom(n, 1, sigmoid(X %*% beta_true))
 Sigma0_inv <- diag(0.01, p)     # prior N(0, 100 I)
 mu0        <- rep(0, p)
 
-## BLR update, exactly as derived in blr_derivations.tex (Example 3):
+## BLR update
 ##   Lambda_{t+1} = (1-rho) Lambda_t + rho (Sigma0^{-1} + X'W_tX),  W_t = diag{p_i(1-p_i)}
 ##   mu_{t+1}     = mu_t - rho * Sigma_{t+1} { Sigma0^{-1}(mu_t-mu0) - X'(y-p_t) + tg_t }
 ## where tg_t is the exact third-moment term (eq. 3-gradmu)
@@ -73,7 +71,6 @@ mean_mcmc <- colMeans(samples$beta)
 sd_mcmc   <- apply(samples$beta, 2, sd)
 
 ## Stan ADVI
-## available "off the shelf" in R, compared against the BLR fit above.
 t_advi <- system.time({
   fit_advi <- vb(sm_logistic, data = stan_data, algorithm = "fullrank",
                  output_samples = 10000, seed = 2)
@@ -82,16 +79,14 @@ samples_advi <- extract(fit_advi)
 mean_advi    <- colMeans(samples_advi$beta)
 sd_advi      <- apply(samples_advi$beta, 2, sd)
 
-## Mean-field ADVI, shown only in Figure~f:logistic as an extra curve
-## (independence assumption across beta_j, versus full-rank ADVI above).
+## Mean-field ADVI
 fit_advi_mf   <- vb(sm_logistic, data = stan_data, algorithm = "meanfield",
                      output_samples = 10000, seed = 2)
 samples_advi_mf <- extract(fit_advi_mf)
 mean_advi_mf    <- colMeans(samples_advi_mf$beta)
 sd_advi_mf      <- apply(samples_advi_mf$beta, 2, sd)
 
-## Table t:logistic reports Q-VMP vs MCMC only; ADVI (fit above) is used
-## only for the Figure~f:logistic overlay and the brief in-text comments.
+
 summary_tab <- data.frame(
   beta      = sprintf("beta_%d", 0:(p - 1)),
   true      = beta_true,
@@ -106,37 +101,54 @@ cat(sprintf("Stan/MCMC wall-clock time: %.3f s\n", t_mcmc["elapsed"]))
 cat(sprintf("Speed-up (MCMC / Q-VMP): %.1fx\n", t_mcmc["elapsed"] / t_qvmp["elapsed"]))
 cat(sprintf("Speed-up (MCMC / ADVI): %.1fx\n", t_mcmc["elapsed"] / t_advi["elapsed"]))
 
-pdf("fig_logistic.pdf", width = 8, height = 8)
+#pdf("fig_logistic.pdf", width = 8, height = 8)
+tiff("fig_logistic.tiff", width = 8, height = 8, units = "in", res = 600, compression = "lzw")
 par(mfrow = c(3, 3))
+
+col_qvmp    <- "#222222" 
+col_full    <- "#0072B2" 
+col_mf      <- "#E69F00" 
+col_mcmc_bg <- "#F2F2F2" 
+col_mcmc_fg <- "#888888" 
+
 for (i in 1:p) {
   h <- hist(samples$beta[, i], breaks = 30, plot = FALSE)
-  ## ylim must clear both the histogram bars and the tallest overlaid curve's
-  ## peak (1/(sd*sqrt(2*pi))), or a tight curve (e.g. mean-field ADVI) gets
-  ## clipped at the top of the panel.
+
   peak <- max(h$density, dnorm(0, 0, c(sd_qvmp[i], sd_advi[i], sd_advi_mf[i])))
+  
+  
   hist(samples$beta[, i], breaks = 30, probability = TRUE,
-       main = bquote(Posterior ~ beta[.(i - 1)]),  ylim = c(0, peak * 1.6), xlab = bquote(beta[.(i - 1)]))
+       main = bquote(Posterior ~ beta[.(i - 1)]),  ylim = c(0, peak * 1.6), 
+       xlab = bquote(beta[.(i - 1)]), col = col_mcmc_bg, border = col_mcmc_fg)
+  
+  # Proposed Q-VMP
   curve(dnorm(x, mean = beta_est[i], sd = sd_qvmp[i]),
-        col = "red", lwd = 2, add = TRUE)
+        col = col_qvmp, lty = 1, lwd = 2.5, add = TRUE)
+  
+  # ADVI Full-Rank
   curve(dnorm(x, mean = mean_advi[i], sd = sd_advi[i]),
-        col = "blue", lwd = 2, add = TRUE)
+        col = col_full, lty = 5, lwd = 2, add = TRUE)
+  
+  # ADVI Mean-Field
   curve(dnorm(x, mean = mean_advi_mf[i], sd = sd_advi_mf[i]),
-        col = "green3", lwd = 2, add = TRUE)
+        col = col_mf, lty = 2, lwd = 2, add = TRUE)
+  
+ 
   legend("topright", legend = c("Q-VMP (BLR)", "ADVI (full-rank)", "ADVI (mean-field)", "MCMC"),
-         col = c("red", "blue", "green3", "black"), lty = c(1, 2, 1, NA), lwd = c(2, 2, 2, NA),
-         pch = c(NA, NA, NA, 15), bty = "n", cex = 0.7)
+         col = c(col_qvmp, col_full, col_mf, col_mcmc_fg), 
+         lty = c(1, 5, 2, NA),     # 1=Solid, 5=Long-dash, 2=Dashed
+         lwd = c(2.5, 2, 2, NA),
+         pch = c(NA, NA, NA, 15),  # Square matching the MCMC histogram texture
+         bty = "n", cex = 0.7)
 }
 dev.off()
 
-saveRDS(list(summary_tab = summary_tab, t_qvmp = t_qvmp, t_mcmc = t_mcmc, t_advi = t_advi),
-        "sim_logistic_results.rds")
+# saveRDS(list(summary_tab = summary_tab, t_qvmp = t_qvmp, t_mcmc = t_mcmc, t_advi = t_advi),
+#         "sim_logistic_results.rds")
 
 ## ============================================================
 ## Example 4: Robust spatial binomial regression, heavy-tailed
 ## (Student-t) field; the range phi is held FIXED at phi_true.
-## Primary fit: the BLR coordinate loop derived in
-## blr_derivations.tex (Example 4: Spatial Regression, eqs.
-## 4-lambda, 4-mu, 4-b). 
 ## ============================================================
 set.seed(2)
 
@@ -172,13 +184,10 @@ X   <- cbind(Xb, diag(n)); d <- p_beta + n; ui <- (p_beta + 1):d
 
 ## beta gets a flat (improper) prior 
 
-## phi is FIXED at phi_true (not estimated); R(phi) and its inverse are constants.
 Rpi_c <- solve(R_true)
 
 nparam_total <- d + d * (d + 1) / 2 + 2
 
-## ---- Primary fit: BLR coordinate loop, exactly as derived in
-## blr_derivations.tex (Example 4: Spatial Regression). One sweep:
 ##   (1) Lambda_{t+1} = (1-rho) Lambda_t + rho (gamma_t B + X'W_tX),  W_t = diag{m_i p_i(1-p_i)}
 ##   (2) mu_{t+1}     = mu_t - rho * Sigma_{t+1} { gamma_t B mu_t - X'(y - m*p_t) + tg_t }
 ##   (3) a_{t+1} = alpha/2 + n/2,  b_{t+1} = alpha/2 + (1/2)(mu_{t+1}'B mu_{t+1} + tr{B Sigma_{t+1}})
@@ -254,8 +263,7 @@ sd_advi_beta   <- apply(samples_advi$beta, 2, sd)
 mean_advi_u    <- colMeans(samples_advi$u)
 cat(sprintf("Stan full-rank ADVI wall-clock: %.3f s\n", t_advi["elapsed"]))
 
-## Mean-field ADVI, shown only in Figure~f:spatial as an extra curve
-## (independence assumption across beta_j, versus full-rank ADVI above).
+## Mean-field ADVI, (independence assumption across beta_j, versus full-rank ADVI above).
 fit_advi_mf      <- vb(get_stanmodel(fit_stan), data = stan_data, algorithm = "meanfield",
                         output_samples = 10000, seed = 2)
 samples_advi_mf  <- extract(fit_advi_mf)
@@ -282,40 +290,60 @@ cat(sprintf("Q-VMP (BLR) wall-clock : %.3f s  (%d parameters, %d BLR iterations)
 cat(sprintf("MCMC  wall-clock : %.1f s\n", t_mcmc["elapsed"]))
 cat(sprintf("Speed-up (MCMC / Q-VMP): %.1f x\n", t_mcmc["elapsed"] / t_qvmp["elapsed"]))
 
-pdf("fig_spatial_joint.pdf", width = 9, height = 6)
+#pdf("fig_spatial_joint.pdf", width = 9, height = 6)
+tiff("fig_spatial_joint.tiff", width = 9, height = 6, units = "in", res = 600, compression = "lzw")
 par(mfrow = c(2, 3))
+
 for (j in 1:p_beta) {
   h <- hist(samples$beta[, j], breaks = 30, plot = FALSE)
   peak <- max(h$density, dnorm(0, 0, c(beta_sd[j], sd_advi_beta[j], sd_advi_mf_beta[j])))
+  
   hist(samples$beta[, j], breaks = 30, probability = TRUE,
-       main = bquote(Posterior ~ beta[.(j - 1)]), ylim = c(0, peak * 1.6), xlab = bquote(beta[.(j - 1)]))
-  curve(dnorm(x, beta_hat[j], beta_sd[j]), col = "red", lwd = 2, add = TRUE)
-  curve(dnorm(x, mean_advi_beta[j], sd_advi_beta[j]), col = "blue", lwd = 2, add = TRUE)
-  curve(dnorm(x, mean_advi_mf_beta[j], sd_advi_mf_beta[j]), col = "green3", lwd = 2, add = TRUE)
+       main = bquote(Posterior ~ beta[.(j - 1)]), ylim = c(0, peak * 1.6), 
+       xlab = bquote(beta[.(j - 1)]), col = col_mcmc_bg, border = col_mcmc_fg)
+  
+  curve(dnorm(x, beta_hat[j], beta_sd[j]), 
+        col = col_qvmp, lty = 1, lwd = 2.5, add = TRUE)
+  
+  curve(dnorm(x, mean_advi_beta[j], sd_advi_beta[j]), 
+        col = col_full, lty = 5, lwd = 2, add = TRUE)
+  
+  curve(dnorm(x, mean_advi_mf_beta[j], sd_advi_mf_beta[j]), 
+        col = col_mf, lty = 2, lwd = 2, add = TRUE)
+  
   legend("topright", legend = c("Q-VMP (BLR)", "ADVI (full-rank)", "ADVI (mean-field)", "MCMC"),
-         col = c("red", "blue", "green3", "black"),
-         lty = c(1, 1, 1, NA), lwd = c(2, 2, 2, NA), pch = c(NA, NA, NA, 15), bty = "n", cex = 0.7)
+         col = c(col_qvmp, col_full, col_mf, col_mcmc_fg),
+         lty = c(1, 5, 2, NA), lwd = c(2.5, 2, 2, NA), 
+         pch = c(NA, NA, NA, 15), bty = "n", cex = 0.7)
 }
-plot(u_mcmc, mean_advi_u, pch = 17, cex = 0.9, col = "blue",
+
+plot(u_mcmc, mean_advi_u, type = "n", 
      xlab = "MCMC posterior mean  u", ylab = "Posterior mean  u",
-     main = "Spatial field", ylim = range(c(u_hat, mean_advi_u)))
-abline(0, 1, col = "black", lwd = 1)
-points(u_mcmc,u_hat, pch = 19, cex = 0.9, col = "red" )
-points(u_mcmc,mean_advi_mf_u, pch = 19, cex = 0.9, col = "green3" )
-legend("topleft", legend = c("Q-VMP (BLR)", "ADVI (full-rank)", "ADVI (mean-field)"), col = c("red", "blue","green3"),
-       pch = c(19, 17), bty = "n", cex = 0.7)
+     main = "Spatial field", ylim = range(c(u_hat, mean_advi_u, mean_advi_mf_u)))
+abline(0, 1, col = "gray40", lwd = 1, lty = 3) 
+
+points(u_mcmc, mean_advi_u, pch = 17, cex = 0.9, col = col_full)
+points(u_mcmc, u_hat, pch = 16, cex = 0.9, col = col_qvmp)
+points(u_mcmc, mean_advi_mf_u, pch = 1, cex = 0.9, col = col_mf, lwd = 1.5)
+
+legend("topleft", 
+       legend = c("Q-VMP (BLR)", "ADVI (full-rank)", "ADVI (mean-field)"), 
+       col = c(col_qvmp, col_full, col_mf),
+       pch = c(16, 17, 1), 
+       pt.lwd = c(1, 1, 1.5),
+       bty = "n", cex = 0.7)
+
 dev.off()
 
-saveRDS(list(summary_tab = summary_tab, beta_hat = beta_hat, beta_sd = beta_sd,
-             u_hat = u_hat, u_true = u_true, u_mcmc = u_mcmc, gam_hat = gam_hat,
-             mean_advi_u = mean_advi_u, phi_true = phi_true, field_rmse = field_rmse,
-             mean_advi_beta = mean_advi_beta, sd_advi_beta = sd_advi_beta,
-             t_qvmp = t_qvmp, t_mcmc = t_mcmc, t_advi = t_advi, n = n, nparam = nparam_total),
-        "sim_spatial_joint_results.rds")
+# saveRDS(list(summary_tab = summary_tab, beta_hat = beta_hat, beta_sd = beta_sd,
+#              u_hat = u_hat, u_true = u_true, u_mcmc = u_mcmc, gam_hat = gam_hat,
+#              mean_advi_u = mean_advi_u, phi_true = phi_true, field_rmse = field_rmse,
+#              mean_advi_beta = mean_advi_beta, sd_advi_beta = sd_advi_beta,
+#              t_qvmp = t_qvmp, t_mcmc = t_mcmc, t_advi = t_advi, n = n, nparam = nparam_total),
+#         "sim_spatial_joint_results.rds")
 
 ## ============================================================
-## Stress test (Section s:stress): one small-n logistic dataset. Same
-## model, prior, and true coefficients as Example 3.
+## Bad approximation example
 ## ============================================================
 p_ex3          <- 9
 mu0_ex3        <- rep(0, p_ex3)
@@ -337,8 +365,7 @@ fit_stan_stress <- sampling(sm_logistic,
 samp_stress <- extract(fit_stan_stress)$beta
 mcmc_mean_stress <- colMeans(samp_stress); mcmc_sd_stress <- apply(samp_stress, 2, sd)
 
-## Stan ADVI, full-rank and mean-field, same two baselines used in the main
-## Example 3 comparison
+## Stan ADVI, full-rank and mean-field
 fit_advi_fr_stress <- vb(sm_logistic,
                           data = list(N = n_stress, K = p_ex3, X = X_stress, y = y_stress),
                           algorithm = "fullrank", output_samples = 10000, seed = 2)
@@ -352,19 +379,31 @@ samp_advi_mf_stress <- extract(fit_advi_mf_stress)$beta
 advi_mf_mean_stress <- colMeans(samp_advi_mf_stress); advi_mf_sd_stress <- apply(samp_advi_mf_stress, 2, sd)
 
 
-pdf("fig_logistic_stress.pdf", width = 8, height = 8)
+#pdf("fig_logistic_stress.pdf", width = 8, height = 8)
+tiff("fig_logistic_stress.tiff", width = 8, height = 8, units = "in", res = 600, compression = "lzw")
 par(mfrow = c(3, 3))
+
 for (i in 1:p_ex3) {
   h <- hist(samp_stress[, i], breaks = 30, plot = FALSE)
   peak <- max(h$density, dnorm(0, 0, c(fit_blr_stress$sd[i], advi_fr_sd_stress[i], advi_mf_sd_stress[i])))
+  
   hist(samp_stress[, i], breaks = 30, probability = TRUE,
        main = bquote(Posterior ~ beta[.(i - 1)]), ylim = c(0, peak * 1.3),
-       xlab = bquote(beta[.(i - 1)]))
-  curve(dnorm(x, mean = fit_blr_stress$mean[i], sd = fit_blr_stress$sd[i]), col = "red", lwd = 2, add = TRUE)
-  curve(dnorm(x, mean = advi_fr_mean_stress[i], sd = advi_fr_sd_stress[i]), col = "blue", lwd = 2, add = TRUE)
-  curve(dnorm(x, mean = advi_mf_mean_stress[i], sd = advi_mf_sd_stress[i]), col = "green3", lwd = 2, add = TRUE)
+       xlab = bquote(beta[.(i - 1)]), col = col_mcmc_bg, border = col_mcmc_fg)
+  
+  curve(dnorm(x, mean = fit_blr_stress$mean[i], sd = fit_blr_stress$sd[i]), 
+        col = col_qvmp, lty = 1, lwd = 2.5, add = TRUE)
+  
+  curve(dnorm(x, mean = advi_fr_mean_stress[i], sd = advi_fr_sd_stress[i]), 
+        col = col_full, lty = 5, lwd = 2, add = TRUE)
+  
+  curve(dnorm(x, mean = advi_mf_mean_stress[i], sd = advi_mf_sd_stress[i]), 
+        col = col_mf, lty = 2, lwd = 2, add = TRUE)
+  
   legend("topright", legend = c("Q-VMP (BLR)", "ADVI (full-rank)", "ADVI (mean-field)", "MCMC"),
-         col = c("red", "blue", "green3", "black"), lty = c(1, 1, 1, NA), lwd = c(2, 2, 2, NA),
+         col = c(col_qvmp, col_full, col_mf, col_mcmc_fg), 
+         lty = c(1, 5, 2, NA), lwd = c(2.5, 2, 2, NA), 
          pch = c(NA, NA, NA, 15), bty = "n", cex = 0.6)
 }
 dev.off()
+
